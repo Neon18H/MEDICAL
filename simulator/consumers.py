@@ -33,7 +33,12 @@ class AttemptConsumer(AsyncWebsocketConsumer):
         timestamp_ms = payload.get("timestamp_ms", 0)
         data = payload.get("payload", {})
         await self._create_event(self.attempt_id, event_type, data, timestamp_ms)
-        await self.send(text_data=json.dumps({"status": "ok"}))
+        response = {"status": "ok"}
+        if event_type == "hit" and data.get("zone") == "forbidden":
+            response["warning"] = "Estás en una zona prohibida. Ajusta la trayectoria."
+        if event_type == "action" and data.get("type"):
+            response["hint"] = f"Verifica la técnica para {data.get('type').lower()}."
+        await self.send(text_data=json.dumps(response))
 
     async def _create_event(self, attempt_id, event_type, data, timestamp_ms):
         await sync_to_async(Event.objects.create)(

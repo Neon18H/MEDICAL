@@ -1,13 +1,30 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card shadow-sm border-0">
-  <div class="card-body">
-    <h5 class="fw-bold">Panel administrativo</h5>
-    <p class="text-muted">Acceso completo a usuarios, procedimientos e intentos.</p>
-    <div class="d-grid gap-2">
-      <a class="btn btn-primary" href="/admin/">Ir al Django Admin</a>
-      <a class="btn btn-outline-secondary" href="/instructor/">Panel de instructor</a>
+<div class="row g-3">
+  <div class="col-xl-7">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h5 class="fw-bold">Panel administrativo</h5>
+        <p class="text-muted">Acceso completo a usuarios, procedimientos e intentos.</p>
+        <div class="d-grid gap-2">
+          <a class="btn btn-primary" href="/admin/">Ir al Django Admin</a>
+          <a class="btn btn-outline-secondary" href="/instructor/">Panel de instructor</a>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-5">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h6 class="fw-bold">Exportaciones rápidas</h6>
+        <button class="btn btn-outline-secondary w-100" id="exportCsvAdmin">Exportar CSV global</button>
+      </div>
     </div>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.App.loadAdminPanel();
+</script>
 {% endblock %}
