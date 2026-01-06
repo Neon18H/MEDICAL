@@ -18,6 +18,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 from accounts.models import AISettings
 from accounts.utils import decrypt_api_key
+from django.conf import settings
 from simulator.ai_providers import build_provider
 from .models import Attempt, Event, Procedure
 from .permissions import IsInstructorOrAdmin
@@ -122,8 +123,8 @@ class AttemptViewSet(viewsets.ModelViewSet):
             if api_key:
                 provider = build_provider(ai_settings.provider, api_key=api_key, model=ai_settings.model_name)
                 attempt.ai_used = True
-                attempt.ai_provider = ai_settings.provider
-                attempt.ai_model = ai_settings.model_name
+                attempt.ai_provider = settings.AI_PROVIDER
+                attempt.ai_model = settings.AI_DEFAULT_MODEL
                 try:
                     ai_feedback = provider.generate_feedback(
                         {
@@ -261,8 +262,10 @@ def attempt_report_pdf(request, attempt_id: int):
         "body": ParagraphStyle(name="body", fontSize=10, leading=12),
     }
     elements = [
-        Paragraph("SmartSurgSim – Reporte Quirúrgico", styles["title"]),
+        Paragraph("SmartSurgSim – Reporte Clínico Profesional", styles["title"]),
         Spacer(1, 0.2 * inch),
+        Paragraph("Centro de Simulación Quirúrgica Inteligente", styles["body"]),
+        Spacer(1, 0.15 * inch),
         Paragraph(f"Estudiante: {attempt.user.username}", styles["body"]),
         Paragraph(f"Procedimiento: {attempt.procedure.name}", styles["body"]),
         Paragraph(f"Fecha: {attempt.ended_at or attempt.started_at}", styles["body"]),
@@ -291,11 +294,40 @@ def attempt_report_pdf(request, attempt_id: int):
         )
     )
     elements.append(table)
+    breakdown = attempt.score_breakdown or {}
+    elements.append(Spacer(1, 0.2 * inch))
+    elements.append(Paragraph("Métricas clave", styles["h2"]))
+    metrics_table = Table(
+        [
+            ["Contacto zona prohibida (ms)", breakdown.get("forbidden_contact_ms", 0)],
+            ["Acciones intensas", breakdown.get("forceful_actions", 0)],
+            ["Movimientos erráticos", breakdown.get("erratic_moves", 0)],
+        ],
+        hAlign="LEFT",
+        colWidths=[2.5 * inch, 1.5 * inch],
+    )
+    metrics_table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5F5")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E2E8F0")),
+            ]
+        )
+    )
+    elements.append(metrics_table)
     elements.append(Spacer(1, 0.2 * inch))
     elements.append(Paragraph("Hallazgos principales", styles["h2"]))
     feedback = attempt.feedback or []
     feedback_text = "<br/>".join([f"• {item}" for item in feedback]) or "Sin observaciones críticas."
     elements.append(Paragraph(feedback_text, styles["body"]))
+    elements.append(Spacer(1, 0.25 * inch))
+    elements.append(Paragraph("Recomendaciones", styles["h2"]))
+    elements.append(
+        Paragraph(
+            "Refuerza la técnica con práctica deliberada, priorizando seguridad y secuencia clínica.",
+            styles["body"],
+        )
+    )
     elements.append(Spacer(1, 0.2 * inch))
     elements.append(Paragraph("Firma instructor: ____________________", styles["body"]))
 
