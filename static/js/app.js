@@ -134,6 +134,30 @@ const App = (() => {
     overlay.classList.add('show');
   };
 
+  const downloadCsv = async () => {
+    const response = await apiFetch(`${apiBase}/admin/export/csv/`);
+    if (!response.ok) {
+      let detail = 'No se pudo descargar el CSV.';
+      try {
+        const data = await response.json();
+        detail = data.detail || detail;
+      } catch (error) {
+        detail = `${detail} (Error ${response.status})`;
+      }
+      window.alert(detail);
+      return;
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'attempts.csv';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
   const initAuth = () => {
     const loginForm = document.getElementById('loginForm');
     const registerForm = document.getElementById('registerForm');
@@ -367,12 +391,26 @@ const App = (() => {
     });
 
     testBtn.addEventListener('click', async () => {
-      const response = await apiFetch(`${authBase}/ai/test/`, { method: 'POST' });
+      const apiKey = form.api_key?.value?.trim();
+      const payload = {};
+      if (apiKey) payload.api_key = apiKey;
+      const response = await apiFetch(`${authBase}/ai/test/`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
       if (response.ok) {
-        message.textContent = 'Conexión exitosa con IA.';
+        const data = await response.json();
+        message.textContent = data.message || 'Conexión exitosa con IA.';
         message.className = 'text-success small mt-2';
       } else {
-        message.textContent = 'Fallo en la conexión IA.';
+        let detail = 'Fallo en la conexión IA.';
+        try {
+          const data = await response.json();
+          detail = data.detail || data.message || detail;
+        } catch (error) {
+          detail = `Fallo en la conexión IA. (${response.status})`;
+        }
+        message.textContent = detail;
         message.className = 'text-danger small mt-2';
       }
     });
@@ -397,20 +435,28 @@ const App = (() => {
 
     const attemptResponse = await apiFetch(`${apiBase}/attempts/start/`, {
       method: 'POST',
-      body: JSON.stringify({ procedure: procedureId }),
+      body: JSON.stringify({ procedure_id: Number(procedureId) }),
     });
     if (!attemptResponse.ok) {
+      let detail = 'El servidor no pudo crear el intento. Intenta nuevamente desde el panel.';
+      try {
+        const data = await attemptResponse.json();
+        detail = data.detail || detail;
+      } catch (error) {
+        detail = `${detail} (Error ${attemptResponse.status})`;
+      }
       showSimulationOverlay(
         'No se pudo iniciar el intento',
-        'El servidor no pudo crear el intento. Intenta nuevamente desde el panel.'
+        detail
       );
       return;
     }
     const attempt = await attemptResponse.json();
+    const attemptId = attempt.attempt_id || attempt.id;
     simulationState.active = true;
-    simulationState.attemptId = attempt.id;
+    simulationState.attemptId = attemptId;
     simulationState.locked = true;
-    window.history.replaceState({}, '', `?attempt=${attempt.id}`);
+    window.history.replaceState({}, '', `/simulator/${procedureId}/?attempt=${attemptId}`);
 
     const title = document.getElementById('procedureTitle');
     const meta = document.getElementById('procedureMeta');
@@ -526,7 +572,7 @@ const App = (() => {
     const connectSocket = () => {
       const token = getToken();
       const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const wsUrl = `${wsProtocol}://${window.location.host}/ws/attempts/${attempt.id}/?token=${token}`;
+      const wsUrl = `${wsProtocol}://${window.location.host}/ws/attempts/${attemptId}/?token=${token}`;
       socket = new WebSocket(wsUrl);
       socket.onopen = () => {
         socketOpen = true;
@@ -555,7 +601,7 @@ const App = (() => {
         socket.send(JSON.stringify(event));
         return;
       }
-      await apiFetch(`${apiBase}/attempts/${attempt.id}/event/`, {
+      await apiFetch(`${apiBase}/attempts/${attemptId}/event/`, {
         method: 'POST',
         body: JSON.stringify(event),
       });
@@ -594,13 +640,13 @@ const App = (() => {
     document.getElementById('finishAttempt').addEventListener('click', async () => {
       const durationSeconds = Math.floor((Date.now() - startTime) / 1000);
       await flushContactDuration();
-      await apiFetch(`${apiBase}/attempts/${attempt.id}/finish/`, {
+      await apiFetch(`${apiBase}/attempts/${attemptId}/finish/`, {
         method: 'POST',
         body: JSON.stringify({ duration_seconds: durationSeconds }),
       });
       simulationState.active = false;
       simulationState.locked = false;
-      window.location.href = `/reports/${attempt.id}/`;
+      window.location.href = `/reports/${attemptId}/`;
     });
 
     document.getElementById('resetView').addEventListener('click', () => {
@@ -1254,15 +1300,11 @@ const App = (() => {
       .join('');
 
     const exportBtn = document.getElementById('exportCsvBtn');
-    exportBtn.addEventListener('click', () => {
-      window.open(`${apiBase}/admin/export/csv/`, '_blank');
-    });
+    exportBtn.addEventListener('click', downloadCsv);
 
     const adminExport = document.getElementById('exportCsvAdmin');
     if (adminExport) {
-      adminExport.addEventListener('click', () => {
-        window.open(`${apiBase}/admin/export/csv/`, '_blank');
-      });
+      adminExport.addEventListener('click', downloadCsv);
     }
   };
 
@@ -1270,9 +1312,7 @@ const App = (() => {
     await loadShell();
     const adminExport = document.getElementById('exportCsvAdmin');
     if (adminExport) {
-      adminExport.addEventListener('click', () => {
-        window.open(`${apiBase}/admin/export/csv/`, '_blank');
-      });
+      adminExport.addEventListener('click', downloadCsv);
     }
   };
 
