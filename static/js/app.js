@@ -2,15 +2,24 @@ const App = (() => {
   const apiBase = '/api';
   const authBase = '/api/auth';
 
+  // Auth flow (JWT):
+  // - Tokens live in localStorage as access_token / refresh_token.
+  // - apiFetch attaches Bearer access_token to every request.
+  // - If a request returns 401, we attempt ONE refresh, persist new access, and retry once.
+  // - If refresh fails or retry still 401, we clear tokens and redirect to login.
   const getToken = () => localStorage.getItem('access_token');
+  const getRefreshToken = () => localStorage.getItem('refresh_token');
   const setTokens = (access, refresh) => {
-    localStorage.setItem('access_token', access);
-    localStorage.setItem('refresh_token', refresh);
+    if (access) localStorage.setItem('access_token', access);
+    if (refresh) localStorage.setItem('refresh_token', refresh);
   };
   const clearTokens = () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
   };
+
+  let isRefreshing = false;
+  let refreshPromise = null;
 
   const apiFetch = async (url, options = {}) => {
     const token = getToken();
@@ -22,27 +31,67 @@ const App = (() => {
       headers.Authorization = `Bearer ${token}`;
     }
     const response = await fetch(url, { ...options, headers });
-    if (response.status === 401 && localStorage.getItem('refresh_token')) {
-      await refreshToken();
-      return apiFetch(url, options);
+    if (response.status !== 401) {
+      return response;
     }
-    return response;
+
+    if (options._retry || !getRefreshToken()) {
+      handleLogout();
+      return response;
+    }
+
+    const refreshed = await refreshToken();
+    if (!refreshed) {
+      handleLogout();
+      return response;
+    }
+    return apiFetch(url, { ...options, _retry: true });
   };
 
   const refreshToken = async () => {
-    const refresh = localStorage.getItem('refresh_token');
-    if (!refresh) return;
-    const response = await fetch(`${authBase}/refresh/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh }),
-    });
-    if (response.ok) {
+    const refresh = getRefreshToken();
+    if (!refresh) return false;
+    if (isRefreshing && refreshPromise) {
+      return refreshPromise;
+    }
+    isRefreshing = true;
+    refreshPromise = (async () => {
+      const response = await fetch(`${authBase}/refresh/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh }),
+      });
+      if (!response.ok) {
+        return false;
+      }
       const data = await response.json();
+      if (!data.access) {
+        return false;
+      }
       setTokens(data.access, refresh);
-    } else {
+      return true;
+    })();
+    const result = await refreshPromise;
+    isRefreshing = false;
+    refreshPromise = null;
+    return result;
+  };
+
+  const handleLogout = async () => {
+    const refresh = getRefreshToken();
+    try {
+      if (refresh) {
+        await fetch(`${authBase}/logout/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh }),
+        });
+      }
+    } finally {
       clearTokens();
-      window.location.href = '/';
+      if (window.location.pathname !== '/') {
+        window.location.href = '/';
+      }
     }
   };
 
@@ -98,7 +147,7 @@ const App = (() => {
   const loadShell = async () => {
     const meResponse = await apiFetch(`${authBase}/me/`);
     if (!meResponse.ok) {
-      window.location.href = '/';
+      handleLogout();
       return null;
     }
     const me = await meResponse.json();
@@ -113,9 +162,8 @@ const App = (() => {
 
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
-      logoutBtn.addEventListener('click', () => {
-        clearTokens();
-        window.location.href = '/';
+      logoutBtn.addEventListener('click', async () => {
+        await handleLogout();
       });
     }
 
