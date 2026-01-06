@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block content %}
+<h4>Procedimientos</h4>
+<div class="row">
+    <div class="col-md-6">
+        <div id="procedure-admin-list" class="list-group"></div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5>Nuevo procedimiento</h5>
+                <div class="mb-2">
+                    <input id="proc-title" class="form-control" placeholder="Título">
+                </div>
+                <div class="mb-2">
+                    <textarea id="proc-description" class="form-control" placeholder="Descripción"></textarea>
+                </div>
+                <div class="mb-2">
+                    <input id="proc-difficulty" class="form-control" placeholder="Dificultad">
+                </div>
+                <button class="btn btn-primary" onclick="createProcedure()">Crear</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    requireAuth('INSTRUCTOR');
+    loadInstructorProcedures();
+</script>
+{% endblock %}

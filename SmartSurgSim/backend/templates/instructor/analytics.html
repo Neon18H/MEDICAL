@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block content %}
+<h4>Analítica</h4>
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h6>Promedios por procedimiento</h6>
+                <table class="table table-sm" id="avg-table">
+                    <thead><tr><th>Procedimiento</th><th>Score promedio</th><th>Intentos</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h6>Errores frecuentes</h6>
+                <ul id="error-list" class="small"></ul>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="card mt-3">
+    <div class="card-body">
+        <h6>Evolución por estudiante (ejemplo)</h6>
+        <canvas id="trend-chart" width="900" height="260" class="w-100 border"></canvas>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    requireAuth('INSTRUCTOR');
+    loadAnalytics();
+</script>
+{% endblock %}
