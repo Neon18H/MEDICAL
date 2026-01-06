@@ -1,0 +1,22 @@
+body {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+}
+
+.card {
+  border-radius: 1rem;
+}
+
+#simCanvas {
+  background: #fdfdfd;
+  min-height: 420px;
+}
+
+.badge-score {
+  font-size: 1.1rem;
+}
+
+.timeline-item {
+  border-left: 3px solid #0d6efd;
+  padding-left: 0.75rem;
+  margin-bottom: 0.75rem;
+}
