@@ -1,29 +1,47 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="row">
-  <div class="col-lg-8">
+<div class="row g-3">
+  <div class="col-xl-8">
     <div class="card shadow-sm border-0 mb-3">
       <div class="card-body">
-        <h5 class="fw-bold">Reporte de intento</h5>
-        <div id="scoreSummary"></div>
-        <div class="mt-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <h5 class="fw-bold">Reporte clínico</h5>
+          <button class="btn btn-outline-primary btn-sm" id="downloadPdf">Generar PDF</button>
+        </div>
+        <div id="scoreSummary" class="mt-3"></div>
+        <div class="row g-3 mt-2">
+          <div class="col-md-6">
+            <canvas id="scoreChart" height="220"></canvas>
+          </div>
+          <div class="col-md-6">
+            <canvas id="timelineChart" height="220"></canvas>
+          </div>
+        </div>
+        <div class="mt-4">
           <h6 class="fw-bold">Timeline de eventos</h6>
           <ul id="timeline" class="small"></ul>
         </div>
       </div>
     </div>
   </div>
-  <div class="col-lg-4">
-    <div class="card shadow-sm border-0">
+  <div class="col-xl-4">
+    <div class="card shadow-sm border-0 mb-3">
       <div class="card-body">
         <h6 class="fw-bold">Heatmap de errores</h6>
         <canvas id="heatmap" width="320" height="220" class="border rounded w-100"></canvas>
+      </div>
+    </div>
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h6 class="fw-bold">Checklist completado</h6>
+        <ul id="stepChecklist" class="small"></ul>
       </div>
     </div>
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
   window.App.loadReport({{ attempt_id }});
 </script>

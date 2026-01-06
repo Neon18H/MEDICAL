@@ -1,22 +1,15 @@
-from django.urls import reverse
 from rest_framework.test import APITestCase
 
 from .models import User
 
 
 class AuthTests(APITestCase):
-    def test_register_and_login(self):
-        response = self.client.post(
-            reverse("register"),
-            {"username": "testuser", "email": "test@example.com", "password": "StrongPass123!", "role": "STUDENT"},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 201)
-        login_response = self.client.post(
-            reverse("token_obtain_pair"),
-            {"username": "testuser", "password": "StrongPass123!"},
-            format="json",
-        )
-        self.assertEqual(login_response.status_code, 200)
-        self.assertIn("access", login_response.data)
-        self.assertIn("refresh", login_response.data)
+    def setUp(self):
+        self.user = User.objects.create_user(username="tester", password="Pass123!", role="STUDENT")
+
+    def test_login_refresh(self):
+        response = self.client.post("/api/auth/login/", {"username": "tester", "password": "Pass123!"}, format="json")
+        self.assertEqual(response.status_code, 200)
+        refresh = response.data["refresh"]
+        refresh_response = self.client.post("/api/auth/refresh/", {"refresh": refresh}, format="json")
+        self.assertEqual(refresh_response.status_code, 200)

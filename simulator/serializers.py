@@ -26,7 +26,12 @@ class AttemptSerializer(serializers.ModelSerializer):
             "score_total",
             "subscores",
             "feedback",
+            "score_breakdown",
             "algorithm_version",
+            "ai_used",
+            "ai_provider",
+            "ai_model",
+            "ai_feedback",
         ]
         read_only_fields = [
             "user",
@@ -36,7 +41,12 @@ class AttemptSerializer(serializers.ModelSerializer):
             "score_total",
             "subscores",
             "feedback",
+            "score_breakdown",
             "algorithm_version",
+            "ai_used",
+            "ai_provider",
+            "ai_model",
+            "ai_feedback",
         ]
 
 
