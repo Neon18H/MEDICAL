@@ -37,6 +37,16 @@ def evaluate_attempt(attempt: Attempt) -> ScoreResult:
         if event.event_type == "hit" and event.payload.get("zone") == "target"
     )
     wrong_actions = sum(1 for event in events if event.event_type == "error")
+    forbidden_contact_ms = sum(
+        event.payload.get("duration_ms", 0)
+        for event in events
+        if event.event_type == "contact_duration" and event.payload.get("zone") == "forbidden"
+    )
+    forceful_actions = sum(
+        1
+        for event in events
+        if event.event_type == "action" and event.payload.get("intensity", 0) >= 8
+    )
 
     completed_steps = {
         event.payload.get("step_id")
@@ -71,12 +81,14 @@ def evaluate_attempt(attempt: Attempt) -> ScoreResult:
     total_penalty += (time_over / 10) * penalties.get("time_over", 1)
     total_penalty += wrong_instrument * penalties.get("wrong_instrument", 4)
     total_penalty += (erratic_moves / 10) * penalties.get("erratic_move", 1)
+    total_penalty += (forbidden_contact_ms / 1000) * penalties.get("forbidden_contact", 2)
+    total_penalty += forceful_actions * penalties.get("forceful_action", 2)
 
     total_score = _clamp(100 - total_penalty)
 
     precision = _clamp(100 - forbidden_hits * 10 - wrong_actions * 5)
     efficiency = _clamp(100 - (time_over / expected_time) * 50)
-    safety = _clamp(100 - forbidden_hits * 15)
+    safety = _clamp(100 - forbidden_hits * 15 - (forbidden_contact_ms / 1000) * 2)
     protocol = _clamp(100 - (steps_omitted / total_steps) * 100)
     instrument_handling = _clamp(100 - wrong_instrument * 12 - (erratic_moves / 10))
 
@@ -93,6 +105,10 @@ def evaluate_attempt(attempt: Attempt) -> ScoreResult:
         feedback.append("Asegura contacto con la zona objetivo para mejorar la precisión.")
     if wrong_instrument:
         feedback.append("Selecciona el instrumento adecuado para cada paso antes de ejecutar acciones.")
+    if forbidden_contact_ms:
+        feedback.append("Reduce el tiempo de contacto en zonas prohibidas para mantener seguridad.")
+    if forceful_actions:
+        feedback.append("Modera la intensidad de las acciones para evitar trauma tisular.")
     if erratic_moves:
         feedback.append("Reduce movimientos erráticos para mejorar la estabilidad manual.")
     if not feedback:
@@ -113,6 +129,8 @@ def evaluate_attempt(attempt: Attempt) -> ScoreResult:
             "forbidden_hits": forbidden_hits,
             "target_hits": target_hits,
             "wrong_actions": wrong_actions,
+            "forbidden_contact_ms": forbidden_contact_ms,
+            "forceful_actions": forceful_actions,
             "steps_omitted": steps_omitted,
             "time_over_seconds": time_over,
             "wrong_instrument": wrong_instrument,

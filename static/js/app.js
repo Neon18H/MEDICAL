@@ -1,6 +1,13 @@
 const App = (() => {
   const apiBase = '/api';
   const authBase = '/api/auth';
+  const simulationState = {
+    active: false,
+    attemptId: null,
+    locked: false,
+  };
+  let cachedUser = null;
+  let shellBootstrapped = false;
 
   // Auth flow (JWT):
   // - Tokens live in localStorage as access_token / refresh_token.
@@ -89,10 +96,42 @@ const App = (() => {
       }
     } finally {
       clearTokens();
+      if (simulationState.active) {
+        showSimulationOverlay(
+          'Sesión expirada',
+          'Tu sesión finalizó durante la simulación. Guarda el progreso y vuelve a iniciar sesión.'
+        );
+        return;
+      }
       if (window.location.pathname !== '/') {
         window.location.href = '/';
       }
     }
+  };
+
+  const showSimulationOverlay = (title, message) => {
+    let overlay = document.getElementById('simulationOverlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'simulationOverlay';
+      overlay.className = 'simulator-overlay';
+      overlay.innerHTML = `
+        <div class="simulator-overlay-card">
+          <h5 class="fw-bold mb-2" id="simulationOverlayTitle"></h5>
+          <p class="text-muted small mb-3" id="simulationOverlayMessage"></p>
+          <div class="d-grid gap-2">
+            <button class="btn btn-primary btn-sm" id="simulationOverlayExit">Salir a login</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#simulationOverlayExit').addEventListener('click', () => {
+        window.location.href = '/';
+      });
+    }
+    overlay.querySelector('#simulationOverlayTitle').textContent = title;
+    overlay.querySelector('#simulationOverlayMessage').textContent = message;
+    overlay.classList.add('show');
   };
 
   const initAuth = () => {
@@ -144,13 +183,19 @@ const App = (() => {
     }
   };
 
-  const loadShell = async () => {
+  const loadShell = async (options = {}) => {
+    if (shellBootstrapped && cachedUser) {
+      return cachedUser;
+    }
     const meResponse = await apiFetch(`${authBase}/me/`);
     if (!meResponse.ok) {
-      handleLogout();
+      if (!options.allowFailure) {
+        handleLogout();
+      }
       return null;
     }
     const me = await meResponse.json();
+    cachedUser = me;
     const nameEl = document.getElementById('userProfileName');
     const roleEl = document.getElementById('userProfileRole');
     if (nameEl) nameEl.textContent = me.username;
@@ -178,6 +223,7 @@ const App = (() => {
           : 'badge bg-secondary-subtle text-secondary';
       }
     }
+    shellBootstrapped = true;
     return me;
   };
 
@@ -295,9 +341,10 @@ const App = (() => {
     const aiResponse = await apiFetch(`${authBase}/ai/settings/`);
     if (aiResponse.ok) {
       const settings = await aiResponse.json();
-      form.provider.value = settings.provider || 'OPENAI';
-      form.model_name.value = settings.model_name || 'gpt-4o-mini';
       form.use_ai.checked = settings.use_ai || false;
+      if (settings.has_key) {
+        form.api_key.placeholder = '••••••••';
+      }
     }
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -332,12 +379,18 @@ const App = (() => {
   };
 
   const startSimulator = async (procedureId) => {
-    const me = await loadShell();
+    const me = await loadShell({ allowFailure: false });
     if (!me) return;
+
+    const topbarTitle = document.querySelector('.topbar-title');
+    if (topbarTitle) topbarTitle.textContent = 'Simulación quirúrgica';
 
     const procedureResponse = await apiFetch(`${apiBase}/procedures/${procedureId}/`);
     if (!procedureResponse.ok) {
-      window.location.href = '/dashboard/';
+      showSimulationOverlay(
+        'No se pudo cargar el procedimiento',
+        'Verifica tu conexión o intenta nuevamente desde el dashboard.'
+      );
       return;
     }
     const procedure = await procedureResponse.json();
@@ -347,10 +400,17 @@ const App = (() => {
       body: JSON.stringify({ procedure: procedureId }),
     });
     if (!attemptResponse.ok) {
-      window.location.href = '/dashboard/';
+      showSimulationOverlay(
+        'No se pudo iniciar el intento',
+        'El servidor no pudo crear el intento. Intenta nuevamente desde el panel.'
+      );
       return;
     }
     const attempt = await attemptResponse.json();
+    simulationState.active = true;
+    simulationState.attemptId = attempt.id;
+    simulationState.locked = true;
+    window.history.replaceState({}, '', `?attempt=${attempt.id}`);
 
     const title = document.getElementById('procedureTitle');
     const meta = document.getElementById('procedureMeta');
@@ -395,11 +455,13 @@ const App = (() => {
       .join('');
 
     const stepObjective = document.getElementById('stepObjective');
+    const stepInstrument = document.getElementById('stepInstrument');
     const stepRisks = document.getElementById('stepRisks');
     const stepTips = document.getElementById('stepTips');
     const currentStepLabel = document.getElementById('currentStepLabel');
     const errorCountEl = document.getElementById('errorCount');
     const progressLabel = document.getElementById('progressLabel');
+    const zoneStatus = document.getElementById('zoneStatus');
 
     let stepIndex = 0;
     let errors = [];
@@ -407,6 +469,25 @@ const App = (() => {
     let socket;
     let socketOpen = false;
     let selectedTool = instruments[0]?.tool || 'SCALPEL';
+    let activeAction = 'CUT';
+    let updateInstrumentVisual = () => {};
+    let flushContactDuration = async () => {};
+    const toolActionMap = {
+      SCALPEL: 'CUT',
+      FORCEPS: 'GRAB',
+      NEEDLE_DRIVER: 'SUTURE',
+      CAUTERY: 'COAGULATE',
+    };
+
+    const syncActionForTool = (tool) => {
+      const mapped = toolActionMap[tool];
+      if (mapped) {
+        activeAction = mapped;
+        document.querySelectorAll('.action-btn').forEach((btn) => {
+          btn.classList.toggle('active', btn.getAttribute('data-action') === activeAction);
+        });
+      }
+    };
 
     const updateStepPanel = () => {
       const step = procedure.steps[stepIndex];
@@ -417,6 +498,7 @@ const App = (() => {
       if (!step) return;
       currentStepLabel.textContent = step.title;
       stepObjective.textContent = step.objectives || 'Controlar la zona quirúrgica.';
+      stepInstrument.textContent = (step.instruments || [selectedTool]).join(', ') || 'Instrumento disponible';
       stepRisks.innerHTML = (step.risks || []).map((risk) => `<li>${risk}</li>`).join('');
       stepTips.innerHTML = (step.tips || []).map((tip) => `<li>${tip}</li>`).join('');
       const totalSteps = procedure.steps.length || 1;
@@ -491,31 +573,33 @@ const App = (() => {
         document.querySelectorAll('.instrument-btn').forEach((el) => el.classList.remove('active'));
         btn.classList.add('active');
         selectedTool = btn.dataset.tool;
+        updateInstrumentVisual(selectedTool);
+        syncActionForTool(selectedTool);
+        updateStepPanel();
         await sendEvent('tool_select', { tool: selectedTool });
       });
     });
     document.querySelector('.instrument-btn')?.classList.add('active');
+    syncActionForTool(selectedTool);
 
     document.querySelectorAll('.action-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const action = btn.getAttribute('data-action');
-        const intensity = Number(document.getElementById('intensitySlider').value);
-        await sendEvent('action', { type: action, intensity, tool: selectedTool, duration: 500 });
-        const step = procedure.steps[stepIndex];
-        if (step && step.actions?.includes(action)) {
-          await sendEvent('step_completed', { step_id: step.id });
-          stepIndex = Math.min(stepIndex + 1, procedure.steps.length);
-          updateStepPanel();
-        }
+        document.querySelectorAll('.action-btn').forEach((el) => el.classList.remove('active'));
+        btn.classList.add('active');
+        activeAction = btn.getAttribute('data-action');
+        await sendEvent('action_select', { action: activeAction, tool: selectedTool });
       });
     });
 
     document.getElementById('finishAttempt').addEventListener('click', async () => {
       const durationSeconds = Math.floor((Date.now() - startTime) / 1000);
+      await flushContactDuration();
       await apiFetch(`${apiBase}/attempts/${attempt.id}/finish/`, {
         method: 'POST',
         body: JSON.stringify({ duration_seconds: durationSeconds }),
       });
+      simulationState.active = false;
+      simulationState.locked = false;
       window.location.href = `/reports/${attempt.id}/`;
     });
 
@@ -578,100 +662,354 @@ const App = (() => {
     const initThreeScene = () => {
       const container = document.getElementById('threeContainer');
       const width = container.clientWidth;
-      const height = 420;
+      const height = container.clientHeight || 460;
+      container.innerHTML = '';
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color('#0f172a');
-      const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-      camera.position.set(0, 2.2, 4.2);
+      scene.background = new THREE.Color('#0b1120');
+      const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 50);
+      camera.position.set(0, 2.4, 4.6);
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(width, height);
+      renderer.setPixelRatio(window.devicePixelRatio || 1);
       renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       container.appendChild(renderer.domElement);
 
       const controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
+      controls.minDistance = 2.5;
+      controls.maxDistance = 7;
+      controls.target.set(0, 1.1, 0);
+      controls.update();
 
-      const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+      const ambient = new THREE.AmbientLight(0xffffff, 0.25);
       scene.add(ambient);
-      const spot = new THREE.DirectionalLight(0xffffff, 1);
-      spot.position.set(3, 5, 2);
-      spot.castShadow = true;
-      scene.add(spot);
+      const hemi = new THREE.HemisphereLight(0xbdd7ff, 0x111827, 0.6);
+      scene.add(hemi);
+      const keyLight = new THREE.SpotLight(0xffffff, 1.3, 15, Math.PI / 5, 0.4, 1);
+      keyLight.position.set(2.8, 4.4, 1.5);
+      keyLight.castShadow = true;
+      keyLight.shadow.mapSize.set(1024, 1024);
+      scene.add(keyLight);
+      const fillLight = new THREE.SpotLight(0xc7d2fe, 0.8, 15, Math.PI / 6, 0.3, 1);
+      fillLight.position.set(-2.2, 4, 1.2);
+      fillLight.castShadow = true;
+      scene.add(fillLight);
 
-      const torsoGeometry = new THREE.CapsuleGeometry(0.9, 1.6, 8, 16);
-      const torsoMaterial = new THREE.MeshStandardMaterial({ color: '#cbd5f5', roughness: 0.4 });
+      const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(10, 10),
+        new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.9, metalness: 0.1 })
+      );
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = 0;
+      floor.receiveShadow = true;
+      scene.add(floor);
+
+      const tableGroup = new THREE.Group();
+      const tableTop = new THREE.Mesh(
+        new THREE.BoxGeometry(3.2, 0.18, 1.6),
+        new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.4 })
+      );
+      tableTop.position.set(0, 0.8, 0);
+      tableTop.receiveShadow = true;
+      tableTop.castShadow = true;
+      tableGroup.add(tableTop);
+      const tableBase = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.35, 0.45, 0.6, 16),
+        new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.3 })
+      );
+      tableBase.position.set(0, 0.4, 0);
+      tableBase.castShadow = true;
+      tableGroup.add(tableBase);
+      scene.add(tableGroup);
+
+      const patientGroup = new THREE.Group();
+      const torsoGeometry = new THREE.CapsuleGeometry(0.8, 1.4, 8, 16);
+      const torsoMaterial = new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.6 });
       const torso = new THREE.Mesh(torsoGeometry, torsoMaterial);
       torso.castShadow = true;
       torso.receiveShadow = true;
-      torso.position.y = 1.0;
-      scene.add(torso);
+      torso.position.set(0, 1.2, 0);
+      patientGroup.add(torso);
+      const head = new THREE.Mesh(
+        new THREE.SphereGeometry(0.26, 16, 16),
+        new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.6 })
+      );
+      head.position.set(0, 1.9, -0.6);
+      head.castShadow = true;
+      patientGroup.add(head);
+      const pelvis = new THREE.Mesh(
+        new THREE.SphereGeometry(0.45, 18, 18),
+        new THREE.MeshStandardMaterial({ color: '#dbeafe', roughness: 0.5 })
+      );
+      pelvis.position.set(0, 0.75, 0.5);
+      pelvis.castShadow = true;
+      patientGroup.add(pelvis);
+      const drape = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.2, 1.1, 0.2, 32),
+        new THREE.MeshStandardMaterial({ color: '#0ea5e9', roughness: 0.8 })
+      );
+      drape.position.set(0, 1.05, 0.1);
+      drape.receiveShadow = true;
+      patientGroup.add(drape);
+      scene.add(patientGroup);
 
-      const target = procedure.zones?.target || { x: 0.3, y: 1.2, z: 0.4, radius: 0.35 };
-      const forbidden = procedure.zones?.forbidden || { x: -0.4, y: 1.1, z: 0.2, radius: 0.3 };
+      const target = procedure.zones?.target || { x: 0.3, y: 1.25, z: 0.25, radius: 0.32 };
+      const forbidden = procedure.zones?.forbidden || { x: -0.35, y: 1.15, z: 0.2, radius: 0.28 };
 
       const organ = new THREE.Mesh(
-        new THREE.SphereGeometry(target.radius, 24, 24),
-        new THREE.MeshStandardMaterial({ color: '#22c55e', emissive: '#16a34a', opacity: 0.9, transparent: true })
+        new THREE.SphereGeometry(target.radius, 28, 28),
+        new THREE.MeshStandardMaterial({
+          color: '#22c55e',
+          emissive: '#0f766e',
+          emissiveIntensity: 0.6,
+          opacity: 0.9,
+          transparent: true,
+        })
       );
       organ.position.set(target.x, target.y, target.z);
+      organ.castShadow = true;
       scene.add(organ);
 
       const danger = new THREE.Mesh(
         new THREE.SphereGeometry(forbidden.radius, 24, 24),
-        new THREE.MeshStandardMaterial({ color: '#ef4444', opacity: 0.35, transparent: true })
+        new THREE.MeshStandardMaterial({ color: '#ef4444', opacity: 0.25, transparent: true })
       );
       danger.position.set(forbidden.x, forbidden.y, forbidden.z);
       scene.add(danger);
 
-      const instrument = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.04, 0.04, 0.8, 12),
-        new THREE.MeshStandardMaterial({ color: '#38bdf8' })
+      const fieldRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.45, 0.65, 40),
+        new THREE.MeshBasicMaterial({ color: '#38bdf8', side: THREE.DoubleSide, opacity: 0.6, transparent: true })
       );
-      instrument.position.set(0, 1.2, 1.2);
-      instrument.rotation.z = Math.PI / 2;
-      scene.add(instrument);
+      fieldRing.position.set(target.x, target.y, target.z);
+      fieldRing.rotation.x = Math.PI / 2;
+      scene.add(fieldRing);
+
+      const instrumentGroup = new THREE.Group();
+      instrumentGroup.position.set(0, 1.2, 1.2);
+      scene.add(instrumentGroup);
+
+      const buildInstrument = (type) => {
+        const group = new THREE.Group();
+        if (type === 'SCALPEL') {
+          const handle = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.03, 0.05, 0.5, 12),
+            new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.6 })
+          );
+          handle.rotation.z = Math.PI / 2;
+          const blade = new THREE.Mesh(
+            new THREE.BoxGeometry(0.24, 0.02, 0.08),
+            new THREE.MeshStandardMaterial({ color: '#e2e8f0', metalness: 0.8 })
+          );
+          blade.position.set(0.32, 0, 0);
+          group.add(handle, blade);
+        } else if (type === 'FORCEPS') {
+          const arm1 = new THREE.Mesh(
+            new THREE.BoxGeometry(0.4, 0.02, 0.04),
+            new THREE.MeshStandardMaterial({ color: '#cbd5f5', metalness: 0.7 })
+          );
+          const arm2 = arm1.clone();
+          arm1.position.set(0.2, 0.02, 0.02);
+          arm2.position.set(0.2, -0.02, -0.02);
+          group.add(arm1, arm2);
+        } else if (type === 'NEEDLE_DRIVER') {
+          const shaft = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.03, 0.03, 0.5, 10),
+            new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.6 })
+          );
+          shaft.rotation.z = Math.PI / 2;
+          const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(0.08, 0.02, 12, 20),
+            new THREE.MeshStandardMaterial({ color: '#e2e8f0', metalness: 0.8 })
+          );
+          ring.position.set(-0.25, 0, 0);
+          group.add(shaft, ring);
+        } else if (type === 'CAUTERY') {
+          const handle = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.04, 0.04, 0.6, 12),
+            new THREE.MeshStandardMaterial({ color: '#0ea5e9', metalness: 0.4 })
+          );
+          handle.rotation.z = Math.PI / 2;
+          const tip = new THREE.Mesh(
+            new THREE.ConeGeometry(0.04, 0.12, 12),
+            new THREE.MeshStandardMaterial({ color: '#f97316', emissive: '#f97316', emissiveIntensity: 0.6 })
+          );
+          tip.position.set(0.34, 0, 0);
+          tip.rotation.z = Math.PI / 2;
+          group.add(handle, tip);
+        }
+        group.visible = false;
+        return group;
+      };
+
+      const instrumentMeshes = {
+        SCALPEL: buildInstrument('SCALPEL'),
+        FORCEPS: buildInstrument('FORCEPS'),
+        NEEDLE_DRIVER: buildInstrument('NEEDLE_DRIVER'),
+        CAUTERY: buildInstrument('CAUTERY'),
+      };
+      Object.values(instrumentMeshes).forEach((mesh) => instrumentGroup.add(mesh));
+      updateInstrumentVisual = (tool) => {
+        Object.entries(instrumentMeshes).forEach(([key, mesh]) => {
+          mesh.visible = key === tool;
+        });
+      };
+      updateInstrumentVisual(selectedTool);
 
       const raycaster = new THREE.Raycaster();
       const mouse = new THREE.Vector2();
       let lastMove = 0;
       let lastZoneHit = null;
+      let zoneContactStart = null;
+      let actionStart = null;
+      let pointerInside = false;
+      let lastScreen = null;
+
+      flushContactDuration = async () => {
+        if (zoneContactStart && lastZoneHit) {
+          await sendEvent('contact_duration', {
+            zone: lastZoneHit,
+            duration_ms: Date.now() - zoneContactStart,
+          });
+        }
+        zoneContactStart = null;
+        lastZoneHit = null;
+      };
+
+      const updateZoneStatus = (status, isDanger = false) => {
+        if (!zoneStatus) return;
+        zoneStatus.textContent = status;
+        zoneStatus.classList.toggle('text-danger', isDanger);
+        zoneStatus.classList.toggle('text-success', status === 'Objetivo');
+      };
+
+      const interactionMeshes = [torso, pelvis];
 
       const onPointerMove = (event) => {
         const rect = renderer.domElement.getBoundingClientRect();
         mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
         mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(mouse, camera);
-        const intersects = raycaster.intersectObject(torso, true);
+        const intersects = raycaster.intersectObjects(interactionMeshes, true);
         if (intersects.length) {
+          pointerInside = true;
           const point = intersects[0].point;
-          instrument.position.copy(point);
+          instrumentGroup.position.copy(point);
+          lastScreen = { x: (mouse.x + 1) / 2, y: (1 - mouse.y) / 2 };
           const now = Date.now();
           if (now - lastMove > 80) {
-            sendEvent('move', { x: point.x, y: point.y, z: point.z, hitObject: 'torso', tool: selectedTool });
+            sendEvent('move', {
+              x: point.x,
+              y: point.y,
+              z: point.z,
+              tool: selectedTool,
+              screen: lastScreen,
+            });
             lastMove = now;
           }
-          const distTarget = instrument.position.distanceTo(organ.position);
-          const distForbidden = instrument.position.distanceTo(danger.position);
+          const distTarget = point.distanceTo(organ.position);
+          const distForbidden = point.distanceTo(danger.position);
           if (distForbidden < forbidden.radius) {
+            updateZoneStatus('Peligro', true);
+            danger.material.opacity = 0.6;
             if (lastZoneHit !== 'forbidden') {
-              sendEvent('hit', { zone: 'forbidden', x: point.x, y: point.y, z: point.z, severity: 'high' });
+              zoneContactStart = Date.now();
+              sendEvent('hit', {
+                zone: 'forbidden',
+                x: point.x,
+                y: point.y,
+                z: point.z,
+                severity: 'high',
+                screen: lastScreen,
+              });
               addError('Contacto con zona prohibida');
               sendEvent('error', { code: 'FORBIDDEN_ZONE', x: point.x, y: point.y, z: point.z });
             }
             lastZoneHit = 'forbidden';
           } else if (distTarget < target.radius) {
+            updateZoneStatus('Objetivo');
+            danger.material.opacity = 0.25;
             if (lastZoneHit !== 'target') {
-              sendEvent('hit', { zone: 'target', x: point.x, y: point.y, z: point.z, severity: 'low' });
+              zoneContactStart = Date.now();
+              sendEvent('hit', {
+                zone: 'target',
+                x: point.x,
+                y: point.y,
+                z: point.z,
+                severity: 'low',
+                screen: lastScreen,
+              });
             }
             lastZoneHit = 'target';
           } else {
+            updateZoneStatus('Estable');
+            danger.material.opacity = 0.25;
+            if (zoneContactStart && lastZoneHit) {
+              sendEvent('contact_duration', {
+                zone: lastZoneHit,
+                duration_ms: Date.now() - zoneContactStart,
+              });
+            }
+            zoneContactStart = null;
             lastZoneHit = null;
           }
+        } else if (pointerInside) {
+          pointerInside = false;
+          updateZoneStatus('Estable');
         }
       };
 
+      const onPointerDown = () => {
+        if (!pointerInside) return;
+        actionStart = Date.now();
+      };
+
+      const onPointerUp = async () => {
+        if (!actionStart) return;
+        const duration = Date.now() - actionStart;
+        const intensity = Number(document.getElementById('intensitySlider').value);
+        const actionPayload = {
+          type: activeAction,
+          intensity,
+          tool: selectedTool,
+          duration,
+          screen: lastScreen,
+        };
+        await sendEvent('action', actionPayload);
+        const step = procedure.steps[stepIndex];
+        if (step && step.actions?.includes(activeAction)) {
+          await sendEvent('step_completed', { step_id: step.id });
+          stepIndex = Math.min(stepIndex + 1, procedure.steps.length);
+          updateStepPanel();
+        }
+        actionStart = null;
+      };
+
       renderer.domElement.addEventListener('pointermove', onPointerMove);
+      renderer.domElement.addEventListener('pointerdown', onPointerDown);
+      renderer.domElement.addEventListener('pointerup', onPointerUp);
+
+      const loader = new THREE.GLTFLoader();
+      loader.load(
+        '/static/models/patient_torso.glb',
+        (gltf) => {
+          const model = gltf.scene;
+          model.traverse((node) => {
+            if (node.isMesh) {
+              node.castShadow = true;
+              node.receiveShadow = true;
+            }
+          });
+          model.position.set(0, 0.6, 0);
+          model.scale.set(1.2, 1.2, 1.2);
+          scene.add(model);
+          patientGroup.visible = false;
+        },
+        undefined,
+        () => {}
+      );
 
       const animate = () => {
         requestAnimationFrame(animate);
@@ -715,12 +1053,19 @@ const App = (() => {
         <h6 class="fw-bold">Feedback</h6>
         <ul>${(attempt.feedback || []).map((item) => `<li>${item}</li>`).join('')}</ul>
       </div>
+      <div class="mt-3 small text-muted">
+        IA usada: ${attempt.ai_used ? 'Sí' : 'No'}
+      </div>
     `;
 
     const timeline = document.getElementById('timeline');
     timeline.innerHTML = data.events
-      .slice(0, 50)
-      .map((event) => `<li class="timeline-item">${event.event_type} - ${event.timestamp_ms}ms</li>`)
+      .slice(0, 60)
+      .map((event) => {
+        const detail = event.payload?.tool ? `(${event.payload.tool})` : '';
+        const action = event.payload?.type ? `: ${event.payload.type}` : '';
+        return `<li class="timeline-item">${event.event_type}${action} ${detail} - ${event.timestamp_ms}ms</li>`;
+      })
       .join('');
 
     const heatmap = document.getElementById('heatmap');
@@ -728,11 +1073,14 @@ const App = (() => {
     ctx.clearRect(0, 0, heatmap.width, heatmap.height);
     ctx.fillStyle = '#f87171';
     data.events
-      .filter((event) => event.event_type === 'error' || event.event_type === 'hit')
+      .filter((event) => event.event_type === 'error' || event.event_type === 'hit' || event.event_type === 'move')
       .forEach((event) => {
-        const { x, y } = event.payload || { x: Math.random() * 320, y: Math.random() * 220 };
+        const screen = event.payload?.screen;
+        if (!screen) return;
+        const x = screen.x * heatmap.width;
+        const y = screen.y * heatmap.height;
         ctx.beginPath();
-        ctx.arc(x || Math.random() * 320, y || Math.random() * 220, 6, 0, Math.PI * 2);
+        ctx.arc(x, y, event.event_type === 'hit' ? 6 : 3, 0, Math.PI * 2);
         ctx.fill();
       });
 

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
+from django.conf import settings
 
 
 @dataclass
@@ -14,28 +15,20 @@ class AIResponse:
     checklist: list[str]
 
 
-class BaseAIProvider:
-    def __init__(self, api_key: str, model: str) -> None:
+class AIClient:
+    """Cliente IA genérico configurable por settings.
+
+    Para adaptar a un proveedor distinto, ajusta AI_PROVIDER, AI_ENDPOINT y AI_AUTH_SCHEME.
+    Si el proveedor no es compatible con OpenAI, adapta _extract_text_from_response.
+    """
+
+    def __init__(self, api_key: str) -> None:
         self.api_key = api_key
-        self.model = model
-
-    def generate_guidance(self, context: dict[str, Any]) -> dict[str, Any]:
-        raise NotImplementedError
-
-    def generate_feedback(self, attempt_summary: dict[str, Any]) -> list[str]:
-        raise NotImplementedError
-
-
-class OpenAIProvider(BaseAIProvider):
-    def _call(self, payload: dict[str, Any]) -> dict[str, Any]:
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=20,
-        )
-        response.raise_for_status()
-        return response.json()
+        self.provider = settings.AI_PROVIDER
+        self.endpoint = settings.AI_ENDPOINT
+        self.default_model = settings.AI_DEFAULT_MODEL
+        self.auth_scheme = settings.AI_AUTH_SCHEME
+        self.timeout = settings.AI_TIMEOUT_SECONDS
 
     def generate_guidance(self, context: dict[str, Any]) -> dict[str, Any]:
         system_prompt = (
@@ -43,68 +36,60 @@ class OpenAIProvider(BaseAIProvider):
             "next_step_suggestion, risk_warnings, checklist."
         )
         user_prompt = json.dumps(context, ensure_ascii=False)
-        payload = {
-            "model": self.model,
+        payload = self._build_payload(system_prompt, user_prompt, temperature=0.2)
+        data = self._post(payload)
+        content = self._extract_text_from_response(data)
+        return _safe_parse_guidance(content)
+
+    def generate_feedback(self, attempt_summary: dict[str, Any]) -> list[str]:
+        system_prompt = "Genera feedback clínico breve en bullets. Devuelve JSON con key bullets."
+        user_prompt = json.dumps(attempt_summary, ensure_ascii=False)
+        payload = self._build_payload(system_prompt, user_prompt, temperature=0.3)
+        data = self._post(payload)
+        content = self._extract_text_from_response(data)
+        return _safe_parse_bullets(content)
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.auth_scheme == "bearer":
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        elif self.auth_scheme == "x-api-key":
+            headers["x-api-key"] = self.api_key
+        return headers
+
+    def _params(self) -> dict[str, str]:
+        if self.auth_scheme == "query":
+            return {"key": self.api_key}
+        return {}
+
+    def _build_payload(self, system_prompt: str, user_prompt: str, temperature: float) -> dict[str, Any]:
+        if self.provider == "gemini":
+            prompt = f"{system_prompt}\n\n{user_prompt}"
+            return {"contents": [{"parts": [{"text": prompt}]}]}
+        return {
+            "model": self.default_model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0.2,
+            "temperature": temperature,
         }
-        data = self._call(payload)
-        content = data["choices"][0]["message"]["content"]
-        return _safe_parse_guidance(content)
 
-    def generate_feedback(self, attempt_summary: dict[str, Any]) -> list[str]:
-        payload = {
-            "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "Genera feedback clínico breve en bullets. Devuelve JSON con key bullets."
-                    ),
-                },
-                {"role": "user", "content": json.dumps(attempt_summary, ensure_ascii=False)},
-            ],
-            "temperature": 0.3,
-        }
-        data = self._call(payload)
-        content = data["choices"][0]["message"]["content"]
-        return _safe_parse_bullets(content)
-
-
-class GeminiProvider(BaseAIProvider):
-    def _call(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
-            params={"key": self.api_key},
+            self.endpoint,
+            headers=self._headers(),
+            params=self._params(),
             json=payload,
-            timeout=20,
+            timeout=self.timeout,
         )
         response.raise_for_status()
         return response.json()
 
-    def generate_guidance(self, context: dict[str, Any]) -> dict[str, Any]:
-        prompt = (
-            "Eres tutor quirúrgico. Devuelve JSON con keys: "
-            "next_step_suggestion, risk_warnings, checklist.\n\n"
-            f"Contexto: {json.dumps(context, ensure_ascii=False)}"
-        )
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-        data = self._call(payload)
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
-        return _safe_parse_guidance(text)
-
-    def generate_feedback(self, attempt_summary: dict[str, Any]) -> list[str]:
-        prompt = (
-            "Genera feedback clínico breve. Devuelve JSON con key bullets.\n\n"
-            f"Resumen: {json.dumps(attempt_summary, ensure_ascii=False)}"
-        )
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-        data = self._call(payload)
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
-        return _safe_parse_bullets(text)
+    def _extract_text_from_response(self, data: dict[str, Any]) -> str:
+        if self.provider == "gemini":
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        return data["choices"][0]["message"]["content"]
 
 
 def _safe_parse_guidance(text: str) -> dict[str, Any]:
@@ -134,7 +119,7 @@ def _safe_parse_bullets(text: str) -> list[str]:
     return [line.strip("- ").strip() for line in text.splitlines() if line.strip()][:6]
 
 
-def build_provider(provider: str, api_key: str, model: str) -> BaseAIProvider:
-    if provider == "GEMINI":
-        return GeminiProvider(api_key=api_key, model=model or "gemini-1.5-flash")
-    return OpenAIProvider(api_key=api_key, model=model or "gpt-4o-mini")
+def build_provider(provider: str, api_key: str, model: str) -> AIClient:
+    del provider
+    del model
+    return AIClient(api_key=api_key)

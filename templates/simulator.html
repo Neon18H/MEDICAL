@@ -10,6 +10,8 @@
         <div class="mt-3">
           <div class="small text-uppercase text-muted">Objetivo</div>
           <div id="stepObjective" class="fw-semibold"></div>
+          <div class="small text-uppercase text-muted mt-2">Instrumento recomendado</div>
+          <div id="stepInstrument" class="fw-semibold"></div>
           <div class="small text-uppercase text-muted mt-2">Riesgos</div>
           <ul id="stepRisks" class="small"></ul>
           <div class="small text-uppercase text-muted mt-2">Tips</div>
@@ -45,6 +47,10 @@
             <div class="hud-value" id="errorCount">0</div>
           </div>
           <div>
+            <div class="hud-label">Zona</div>
+            <div class="hud-value" id="zoneStatus">Estable</div>
+          </div>
+          <div>
             <div class="hud-label">Progreso</div>
             <div class="hud-value" id="progressLabel">0%</div>
           </div>
@@ -57,7 +63,7 @@
           <button class="btn btn-outline-primary action-btn" data-action="COAGULATE">Cauterizar</button>
           <button class="btn btn-outline-primary action-btn" data-action="IRRIGATE">Irrigar</button>
           <button id="resetView" class="btn btn-outline-secondary">Reset view</button>
-          <button id="finishAttempt" class="btn btn-success ms-auto">Finalizar intento</button>
+          <button id="finishAttempt" class="btn btn-success ms-auto">Finalizar simulación</button>
         </div>
         <div class="mt-3">
           <div class="small text-uppercase text-muted">Eventos en vivo</div>
@@ -69,7 +75,7 @@
   <div class="col-xl-3">
     <div class="card shadow-sm border-0 mb-3">
       <div class="card-body">
-        <h6 class="fw-bold">AI Surgical Coach</h6>
+        <h6 class="fw-bold">Guía Quirúrgica</h6>
         <div class="ai-coach">
           <div class="ai-section">
             <div class="small text-uppercase text-muted">Paso recomendado ahora</div>
@@ -84,7 +90,7 @@
             <ul id="aiWarnings" class="small"></ul>
           </div>
           <div class="ai-chat mt-3">
-            <label class="form-label small">Pregúntale al tutor</label>
+            <label class="form-label small">Pregúntale al tutor IA</label>
             <textarea id="aiQuestion" class="form-control form-control-sm" rows="2" placeholder="¿Cuál es el siguiente paso?"></textarea>
             <button id="aiAskBtn" class="btn btn-primary btn-sm w-100 mt-2">Enviar pregunta</button>
             <div id="aiAnswer" class="small mt-2 text-muted"></div>

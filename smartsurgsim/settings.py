@@ -1,4 +1,5 @@
 """Django settings for SmartSurgSim."""
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -99,3 +100,9 @@ CHANNEL_LAYERS = {
         "BACKEND": "channels.layers.InMemoryChannelLayer",
     }
 }
+
+AI_PROVIDER = os.getenv("AI_PROVIDER", "openai_compatible")
+AI_ENDPOINT = os.getenv("AI_ENDPOINT", "https://api.openai.com/v1/chat/completions")
+AI_DEFAULT_MODEL = os.getenv("AI_DEFAULT_MODEL", "gpt-4o-mini")
+AI_AUTH_SCHEME = os.getenv("AI_AUTH_SCHEME", "bearer")
+AI_TIMEOUT_SECONDS = int(os.getenv("AI_TIMEOUT_SECONDS", "20"))

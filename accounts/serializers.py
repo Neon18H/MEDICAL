@@ -30,7 +30,7 @@ class AISettingsSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AISettings
-        fields = ["provider", "model_name", "use_ai", "api_key", "has_key"]
+        fields = ["use_ai", "api_key", "has_key"]
 
     def get_has_key(self, obj: AISettings) -> bool:
         return bool(obj.api_key_encrypted)

@@ -43,23 +43,14 @@
           <h5 class="fw-bold mb-0">AI Settings</h5>
           <span class="badge bg-info-subtle text-info">Seguro</span>
         </div>
-        <p class="text-muted small">Configura tu proveedor IA sin tocar código.</p>
+        <p class="text-muted small">
+          Compatible con OpenAI, Gemini, OpenRouter u otros proveedores. Solo necesitas tu API Key.
+        </p>
         <form id="aiSettingsForm">
-          <div class="mb-2">
-            <label class="form-label small">Proveedor</label>
-            <select class="form-select form-select-sm" name="provider">
-              <option value="OPENAI">OpenAI</option>
-              <option value="GEMINI">Gemini</option>
-            </select>
-          </div>
-          <div class="mb-2">
-            <label class="form-label small">Modelo</label>
-            <input class="form-control form-control-sm" name="model_name" placeholder="gpt-4o-mini" />
-          </div>
           <div class="mb-2">
             <label class="form-label small">API Key</label>
             <input class="form-control form-control-sm" name="api_key" placeholder="sk-..." />
-            <div class="form-text">Se almacena cifrada en servidor.</div>
+            <div class="form-text">Se almacena cifrada en servidor. Deja vacío para no cambiarla.</div>
           </div>
           <div class="form-check form-switch mb-2">
             <input class="form-check-input" type="checkbox" id="useAiToggle" name="use_ai" />
@@ -67,7 +58,7 @@
           </div>
           <div class="d-grid gap-2">
             <button class="btn btn-primary btn-sm" type="submit">Guardar</button>
-            <button class="btn btn-outline-secondary btn-sm" type="button" id="testAiBtn">Test Connection</button>
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="testAiBtn">Probar conexión</button>
           </div>
           <div id="aiSettingsMessage" class="small mt-2"></div>
         </form>
