@@ -1,6 +1,9 @@
+from django.conf import settings
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
 from simulator.ai_providers import build_provider
 
@@ -15,6 +18,9 @@ class RegisterView(generics.CreateAPIView):
 
 
 class MeView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
     def get(self, request):
         user = request.user
         return Response(
@@ -68,3 +74,17 @@ class AITestView(APIView):
         except Exception as exc:  # noqa: BLE001 - feedback controlado
             return Response({"detail": f"Error IA: {exc}"}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"status": "ok", "sample": result})
+
+
+class LogoutView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        refresh = request.data.get("refresh")
+        if refresh and "rest_framework_simplejwt.token_blacklist" in settings.INSTALLED_APPS:
+            try:
+                token = RefreshToken(refresh)
+                token.blacklist()
+            except TokenError:
+                pass
+        return Response({"detail": "Logged out"}, status=status.HTTP_200_OK)
