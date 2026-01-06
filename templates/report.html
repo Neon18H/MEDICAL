@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+  <div class="col-lg-8">
+    <div class="card shadow-sm border-0 mb-3">
+      <div class="card-body">
+        <h5 class="fw-bold">Reporte de intento</h5>
+        <div id="scoreSummary"></div>
+        <div class="mt-3">
+          <h6 class="fw-bold">Timeline de eventos</h6>
+          <ul id="timeline" class="small"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h6 class="fw-bold">Heatmap de errores</h6>
+        <canvas id="heatmap" width="320" height="220" class="border rounded w-100"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.App.loadReport({{ attempt_id }});
+</script>
+{% endblock %}
