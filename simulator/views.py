@@ -8,7 +8,8 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import action, api_view, permission_classes, renderer_classes
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -23,7 +24,13 @@ from simulator.ai_providers import build_provider
 from .models import Attempt, Event, Procedure
 from .permissions import IsInstructorOrAdmin
 from .scoring import evaluate_attempt
-from .serializers import AttemptCreateSerializer, AttemptSerializer, EventSerializer, ProcedureSerializer
+from .serializers import (
+    AttemptCreateSerializer,
+    AttemptSerializer,
+    AttemptStartSerializer,
+    EventSerializer,
+    ProcedureSerializer,
+)
 
 
 # ---- Template Views ----
@@ -84,6 +91,7 @@ class ProcedureViewSet(viewsets.ModelViewSet):
 class AttemptViewSet(viewsets.ModelViewSet):
     queryset = Attempt.objects.select_related("procedure", "user").all()
     serializer_class = AttemptSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
@@ -140,11 +148,49 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 except Exception:
                     attempt.ai_used = False
         attempt.save()
-        return Response(AttemptSerializer(attempt).data)
+        return Response(
+            {
+                "attempt_id": attempt.id,
+                "score_total": attempt.score_total,
+                "subscores": attempt.subscores,
+                "feedback": attempt.feedback,
+            }
+        )
 
     @action(detail=True, methods=["post"], url_path="finish")
     def finish(self, request, pk=None):
         return self.complete(request, pk=pk)
+
+    @action(detail=False, methods=["post"], url_path="start")
+    def start(self, request):
+        serializer = AttemptStartSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        attempt = Attempt.objects.create(user=request.user, procedure=serializer.validated_data["procedure"])
+        data = {
+            "attempt_id": attempt.id,
+            "status": attempt.status,
+            "ws_url": f"/ws/attempts/{attempt.id}/",
+        }
+        return Response(data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"], url_path="me")
+    def me(self, request):
+        attempts = (
+            Attempt.objects.filter(user=request.user)
+            .select_related("procedure")
+            .order_by("-started_at")
+        )
+        return Response(AttemptSerializer(attempts, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="event")
+    def event(self, request, pk=None):
+        attempt = self.get_object()
+        if request.user.role == "STUDENT" and attempt.user != request.user:
+            return Response({"detail": "No autorizado"}, status=status.HTTP_403_FORBIDDEN)
+        serializer = EventSerializer(data={**request.data, "attempt_id": attempt.id})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"ok": True}, status=status.HTTP_201_CREATED)
 
 
 class EventViewSet(viewsets.ModelViewSet):
@@ -168,10 +214,15 @@ class EventViewSet(viewsets.ModelViewSet):
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def attempt_start(request):
-    serializer = AttemptCreateSerializer(data=request.data)
+    serializer = AttemptStartSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    attempt = serializer.save(user=request.user)
-    return Response(AttemptSerializer(attempt).data, status=status.HTTP_201_CREATED)
+    attempt = Attempt.objects.create(user=request.user, procedure=serializer.validated_data["procedure"])
+    data = {
+        "attempt_id": attempt.id,
+        "status": attempt.status,
+        "ws_url": f"/ws/attempts/{attempt.id}/",
+    }
+    return Response(data, status=status.HTTP_201_CREATED)
 
 
 @api_view(["POST"])
@@ -180,10 +231,10 @@ def attempt_event(request, attempt_id: int):
     attempt = get_object_or_404(Attempt, id=attempt_id)
     if request.user.role == "STUDENT" and attempt.user != request.user:
         return Response({"detail": "No autorizado"}, status=status.HTTP_403_FORBIDDEN)
-    serializer = EventSerializer(data={**request.data, "attempt": attempt.id})
+    serializer = EventSerializer(data={**request.data, "attempt_id": attempt.id})
     serializer.is_valid(raise_exception=True)
     serializer.save()
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response({"ok": True}, status=status.HTTP_201_CREATED)
 
 
 @api_view(["GET"])
@@ -208,6 +259,7 @@ def analytics_overview(request):
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
+@renderer_classes([JSONRenderer])
 def export_attempts_csv(request):
     if request.user.role not in {"INSTRUCTOR", "ADMIN"}:
         return Response({"detail": "No autorizado"}, status=status.HTTP_403_FORBIDDEN)
