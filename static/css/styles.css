@@ -161,7 +161,8 @@ body {
 
 .three-canvas {
   width: 100%;
-  height: 460px;
+  height: clamp(480px, 60vh, 720px);
+  min-height: 480px;
   background: #0b1120;
   border-radius: 16px;
   overflow: hidden;

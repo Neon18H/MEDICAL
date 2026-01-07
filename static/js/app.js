@@ -707,8 +707,14 @@ const App = (() => {
 
     const initThreeScene = () => {
       const container = document.getElementById('threeContainer');
-      const width = container.clientWidth;
-      const height = container.clientHeight || 460;
+      const getContainerSize = () => {
+        const rect = container.getBoundingClientRect();
+        return {
+          width: rect.width || container.clientWidth || 820,
+          height: rect.height || container.clientHeight || 520,
+        };
+      };
+      const { width, height } = getContainerSize();
       container.innerHTML = '';
       const scene = new THREE.Scene();
       scene.background = new THREE.Color('#0b1120');
@@ -728,6 +734,19 @@ const App = (() => {
       controls.maxDistance = 7;
       controls.target.set(0, 1.1, 0);
       controls.update();
+
+      const resizeRenderer = () => {
+        const { width: nextWidth, height: nextHeight } = getContainerSize();
+        if (!nextWidth || !nextHeight) return;
+        camera.aspect = nextWidth / nextHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(nextWidth, nextHeight, false);
+      };
+      window.addEventListener('resize', resizeRenderer);
+      if (window.ResizeObserver) {
+        const observer = new ResizeObserver(() => resizeRenderer());
+        observer.observe(container);
+      }
 
       const ambient = new THREE.AmbientLight(0xffffff, 0.25);
       scene.add(ambient);
@@ -1054,7 +1073,9 @@ const App = (() => {
           patientGroup.visible = false;
         },
         undefined,
-        () => {}
+        (error) => {
+          console.error('No se pudo cargar el modelo del paciente.', error);
+        }
       );
 
       const animate = () => {

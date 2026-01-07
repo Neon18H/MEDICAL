@@ -19,6 +19,7 @@ class AttemptSerializer(serializers.ModelSerializer):
             "id",
             "user",
             "procedure",
+            "procedure_id",
             "procedure_detail",
             "status",
             "started_at",
@@ -36,6 +37,7 @@ class AttemptSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "user",
+            "procedure_id",
             "status",
             "started_at",
             "ended_at",
